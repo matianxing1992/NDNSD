@@ -93,5 +93,34 @@ ServiceInfoFileProcessor::processFile()
   }
 }
 
+void ServiceInfoFileProcessor::writeToFile(const std::string& filename)
+  {
+    try {
+      boost::property_tree::ptree pt;
+
+      // required
+      boost::property_tree::ptree required;
+      required.put("serviceName", m_serviceName.toUri());
+      required.put("appPrefix", m_applicationPrefix.toUri());
+      required.put("lifetime", m_serviceLifeTime.count());
+      pt.add_child("required", required);
+
+      // details
+      boost::property_tree::ptree details;
+      for (const auto& entry : m_serviceMetaInfo) {
+        details.put(entry.first, entry.second);
+      }
+      pt.add_child("details", details);
+
+      // Write to file
+      boost::property_tree::write_info(filename, pt);
+      NDN_LOG_INFO("Successfully wrote to file: " << filename);
+    } catch (std::exception const& e) {
+      std::cerr << e.what() << std::endl;
+      NDN_LOG_ERROR("Error writing to file: " << filename);
+      throw e;
+    }
+  }
+
 } // namespace discovery
 } // namespace ndnsd

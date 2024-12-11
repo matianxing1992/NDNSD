@@ -24,6 +24,7 @@
 #define NDNSD_SYNC_ADAPTER_HPP
 
 #include <ndn-cxx/face.hpp>
+#include <ndn-cxx/security/key-chain.hpp>
 #include <ChronoSync/logic.hpp>
 #include <PSync/full-producer.hpp>
 
@@ -102,6 +103,7 @@ private:
   SyncUpdateCallback m_syncUpdateCallback;
   std::shared_ptr<chronosync::Logic> m_chronoSyncLogic;
   std::shared_ptr<psync::FullProducer> m_psyncLogic;
+  ndn::KeyChain keyChain;
 };
 
 } // namespace ndnsd

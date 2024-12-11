@@ -29,6 +29,8 @@ NDN_LOG_INIT(ndnsd.ServiceDiscovery);
 namespace ndnsd {
 namespace discovery {
 
+uint32_t RETRANSMISSION_COUNT = 5;
+
 // consumer
 ServiceDiscovery::ServiceDiscovery(const ndn::Name& serviceName,
                                    const std::map<char, uint8_t>& pFlags,
@@ -222,6 +224,7 @@ ServiceDiscovery::sendData(const ndn::Name& name)
 
   auto timeDiff = ndn::time::system_clock::now() - m_producerState.publishTimestamp;
   auto timeToExpire = ndn::time::duration_cast<ndn::time::seconds>(timeDiff);
+  // cast timeDiff into seconds using
 
   m_serviceStatus = (timeToExpire > m_producerState.serviceLifetime) ? EXPIRED : ACTIVE;
 

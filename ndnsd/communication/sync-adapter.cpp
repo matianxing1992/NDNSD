@@ -28,6 +28,8 @@
 
 NDN_LOG_INIT(ndnsd.SyncProtocolAdapter);
 
+using namespace ndn::time_literals;
+
 namespace ndnsd {
 
 const auto CHRONOSYNC_FIXED_SESSION = ndn::name::Component::fromNumber(0);
@@ -57,15 +59,23 @@ SyncProtocolAdapter::SyncProtocolAdapter(ndn::Face& face,
                           chronosync::Logic::DEFAULT_RECOVERY_INTEREST_LIFETIME,
                           CHRONOSYNC_FIXED_SESSION);
   }
-  else {
+  else
+  {
     NDN_LOG_DEBUG("Using PSync");
-    m_psyncLogic = std::make_shared<psync::FullProducer>(80,
-                     face,
-                     syncPrefix,
-                     userPrefix,
-                     std::bind(&SyncProtocolAdapter::onPSyncUpdate, this, _1),
-                     syncInterestLifetime);
+    m_psyncLogic = std::make_shared<psync::FullProducer>(face,
+                          keyChain,
+                          syncPrefix,
+                          [this, syncInterestLifetime]
+                          {
+                            psync::FullProducer::Options opts;
+                            opts.onUpdate = std::bind(&SyncProtocolAdapter::onPSyncUpdate, this, _1);
+                            opts.ibfCount = 80;
+                            opts.syncInterestLifetime = syncInterestLifetime;
+                            opts.syncDataFreshness = syncInterestLifetime;
+                            return opts;
+                          }());  
   }
+  addUserNode(userPrefix);
 }
 
 void
@@ -91,7 +101,7 @@ SyncProtocolAdapter::publishUpdate(const ndn::Name& userPrefix)
   }
   else {
     auto seq_p = m_psyncLogic->getSeqNo(userPrefix);
-    NDN_LOG_INFO("Publishing update for: " << userPrefix << "/" << seq_p.value()+1);
+    NDN_LOG_INFO("Publishing update for: " << userPrefix << "/" << seq_p.value_or(1));
     m_psyncLogic->publishName(userPrefix);
   }
 }

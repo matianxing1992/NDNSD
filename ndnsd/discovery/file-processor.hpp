@@ -64,6 +64,19 @@ public:
   void
   processFile();
 
+  void
+  writeToFile(const std::string& filename);
+
+  void SetServiceMetaInfo(const std::map<std::string, std::string>& serviceMetaInfo)
+  {
+    m_serviceMetaInfo = serviceMetaInfo;
+  }
+
+  void updateServiceMetaInfo(const std::string& key, const std::string& value)
+  {
+    m_serviceMetaInfo[key] = value;
+  }
+
 private:
   const std::string m_filename;
   ndn::Name m_serviceName;

@@ -42,7 +42,7 @@ Once everything is installed, go through the following steps to run the consumer
 
 #### start ndnsd-consumer
 * `export NDN_LOG=ndnsd.*=TRACE`
-* `ndnsd-consumer -s repo` (for help, can run `ndnsd-consumer -h`)
+* `ndnsd-consumer -s printer` (for help, can run `ndnsd-consumer -h`)
 * Sample output
 
 ```
@@ -63,5 +63,12 @@ Once everything is installed, go through the following steps to run the consumer
 1620755349.641581  INFO: [ndnsd.examples.ConsumerApp] Callback: service-name:/repo/r1
 ```
 
+#### start ndnsd-multi-producer  
+* `export NDN_LOG=ndnsd.*=TRACE`
+* `ndnsd-multi-producer ObjectDetection.info FlightControl.info` (make sure `ObjectDetection.info FlightControl.info` files are in the directory from where this command is executed)
+* Sample output
 
-
+#### start ndnsd--multi-consumer
+* `export NDN_LOG=ndnsd.*=TRACE`
+* `ndnsd-multi-consumer -s ObjectDetection FlightControl` (for help, can run `ndnsd--multi-consumer -h`)
+* Sample output

@@ -30,6 +30,8 @@
 #include <ndn-cxx/util/time.hpp>
 #include <ndn-cxx/util/dummy-client-face.hpp>
 
+#include <thread>
+
 using namespace ndn::time_literals;
 
 namespace ndnsd {
@@ -65,7 +67,8 @@ enum {
   interest is received.
 **/
 // const char* NDNSD_RELOAD_PREFIX; = "/ndnsd/reload";
-uint32_t RETRANSMISSION_COUNT = 5;
+extern uint32_t RETRANSMISSION_COUNT;
+
 
 struct Details
 {
@@ -82,7 +85,7 @@ struct Details
   ndn::Name serviceName;
   ndn::Name applicationPrefix;
   ndn::time::seconds serviceLifetime;
-  ndn::time::system_clock::TimePoint publishTimestamp;
+  ndn::time::system_clock::time_point publishTimestamp;
   std::map<std::string, std::string> serviceMetaInfo;
 };
 
@@ -243,6 +246,10 @@ private:
   const ndn::Block&
   wireEncode();
 
+public:
+  uint8_t m_appType;
+  Details m_producerState;
+
 private:
   ndn::Face m_face;
   ndn::KeyChain m_keyChain;
@@ -252,10 +259,8 @@ private:
   ndn::Name m_serviceName;
   // std::map<char, uint8_t> m_Flags; //used??
 
-  Details m_producerState;
   Reply m_consumerReply;
 
-  uint8_t m_appType;
   uint8_t m_counter;
   // Map to store interest and its retransmission count
   std::map <ndn::Name, uint32_t> m_interestRetransmission;
@@ -273,6 +278,44 @@ private:
   DiscoveryCallback m_discoveryCallback;
   ndn::Name m_reloadPrefix;
 };
+
+class MultiServiceDiscovery {
+public:
+    MultiServiceDiscovery() {}
+
+    void addServiceDiscovery(std::shared_ptr<ndnsd::discovery::ServiceDiscovery> serviceDiscovery) {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_serviceDiscoveries.push_back(serviceDiscovery);
+    }
+
+    void startAll() {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        for (auto& serviceDiscovery : m_serviceDiscoveries) {
+            if(serviceDiscovery->m_appType == PRODUCER) {
+              std::thread t(&ndnsd::discovery::ServiceDiscovery::producerHandler, serviceDiscovery);
+              //t.detach(); // Detach thread to let it run independently
+              m_threads.push_back(std::move(t));
+            }else{
+              std::thread t(&ndnsd::discovery::ServiceDiscovery::consumerHandler, serviceDiscovery);
+              //t.detach(); // Detach thread to let it run independently
+              m_threads.push_back(std::move(t));
+            }
+        }
+    }
+
+    void stopAll() {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        for (auto& serviceDiscovery : m_serviceDiscoveries) {
+            serviceDiscovery->stop();
+        }
+    }
+
+private:
+    std::vector<std::shared_ptr<ndnsd::discovery::ServiceDiscovery>> m_serviceDiscoveries;
+    std::vector<std::thread> m_threads;
+    std::mutex m_mutex;
+};
+
 } //namespace discovery
 } //namespace ndnsd
 #endif // NDNSD_SERVICE_DISCOVERY_HPP

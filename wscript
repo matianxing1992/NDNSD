@@ -17,6 +17,8 @@ def options(opt):
                       help='Build examples')
 
 def configure(conf):
+    conf.env.CXXFLAGS = ['-std=c++17']
+
     conf.load(['compiler_cxx', 'gnu_dirs',
                'default-compiler-flags', 'boost'])
 
