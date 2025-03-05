@@ -20,8 +20,6 @@
 #ifndef NDNSD_SERVICE_DISCOVERY_HPP
 #define NDNSD_SERVICE_DISCOVERY_HPP
 
-#include "ndnsd/communication/sync-adapter.hpp"
-
 #include "file-processor.hpp"
 
 #include <ndn-cxx/face.hpp>
@@ -29,6 +27,12 @@
 #include <ndn-cxx/util/scheduler.hpp>
 #include <ndn-cxx/util/time.hpp>
 #include <ndn-cxx/util/dummy-client-face.hpp>
+
+#include <ndn-cxx/encoding/block-helpers.hpp>
+
+#include <ndn-svs/svspubsub.hpp>
+
+#include <iostream>
 
 #include <thread>
 
@@ -38,18 +42,21 @@ namespace ndnsd {
 namespace discovery {
 namespace tlv {
 
-enum {
-  DiscoveryData = 128,
-  ServiceInfo = 129,
-  ServiceStatus = 130
-};
+  enum {
+    DiscoveryData = 128,
+    ServiceInfo = 129,
+    ServiceStatus = 130,
+    Name = 131,               // New TLV type for serviceName
+    ApplicationPrefix = 132,  // New TLV type for applicationPrefix
+    ServiceLifetime = 133,    // New TLV type for serviceLifetime
+    PublishTimestamp = 134,   // New TLV type for publishTimestamp
+    ServiceMetaInfo = 135,    // New TLV type for serviceMetaInfo
+    Key = 136,                // New TLV type for keys in serviceMetaInfo
+    Value = 137,               // New TLV type for values in serviceMetaInfo
+    KeyValuePair = 138         // New TLV type for key-value pairs in serviceMetaInfo
+  };
 
 } // namespace tlv
-
-enum {
-  PRODUCER = 0,
-  CONSUMER = 1,
-};
 
 enum {
   OPTIONAL = 0,
@@ -70,44 +77,103 @@ enum {
 extern uint32_t RETRANSMISSION_COUNT;
 
 
-struct Details
-{
-  /**
-    ndn::Name: serviceName: Service producer is willing to publish under.
-     syncPrefix will be constructed from the service type
-     e.g. serviceType printer, syncPrefix = /<prefix>/discovery/printer
-    map: serviceMetaInfo Detail information about the service, key-value map
-    ndn::Name applicationPrefix service provider application name
-    ndn::time timeStamp When the userPrefix was updated for the last time, default = now()
-    ndn::time prefixExpTime Lifetime of the service
-  **/
-
-  ndn::Name serviceName;
-  ndn::Name applicationPrefix;
-  ndn::time::seconds serviceLifetime;
-  ndn::time::system_clock::time_point publishTimestamp;
-  std::map<std::string, std::string> serviceMetaInfo;
-};
-
-struct Reply
-{
-  std::map<std::string, std::string> serviceDetails;
-  int status;
-};
-
 class Error : public std::runtime_error
 {
 public:
   using std::runtime_error::runtime_error;
 };
+struct Details
+{
+  ndn::Name serviceName;
+  ndn::Name applicationPrefix;
+  int serviceLifetime;
+  time_t publishTimestamp;
+  std::map<std::string, std::string> serviceMetaInfo;
 
-typedef std::function<void(const Reply& serviceUpdates)> DiscoveryCallback;
+  // Function to decode an NDN Block into a Details object
+  static Details decode(const ndn::Block& block)
+  {
+    Details details;
+    if (block.type() != tlv::ServiceInfo) {
+      throw Error("Invalid TLV type");
+    }
+    block.parse();
 
-std::map<std::string, std::string>
-processData(std::string reply);
+    for (const auto& element : block.elements()) {
+      switch (element.type()) {
+        case tlv::Name:
+          details.serviceName = ndn::Name(ndn::readString(element));
+          break;
+        case tlv::ApplicationPrefix:
+          details.applicationPrefix = ndn::Name(ndn::readString(element));
+          break;
+        case tlv::ServiceLifetime:
+          details.serviceLifetime = ndn::readNonNegativeInteger(element);
+          break;
+        case tlv::PublishTimestamp:
+          details.publishTimestamp = ndn::readNonNegativeInteger(element);
+          break;
+        case tlv::ServiceMetaInfo:
+          element.parse();
+          for (const auto& keyValueElement : element.elements()) {
+            keyValueElement.parse();
+            std::string key = ndn::readString(keyValueElement.get(tlv::Key));
+            std::string value = ndn::readString(keyValueElement.get(tlv::Value));
+            details.serviceMetaInfo[key] = value;
+          }
+          break;
+        default:
+          throw Error("Unknown TLV type");
+      }
+    }
 
-Reply
-wireDecode(const ndn::Block& wire);
+    return details;
+  }
+
+  // Function to encode a Details object into an NDN Block
+  ndn::Block encode() const
+  {
+    ndn::Block buffer(tlv::ServiceInfo);
+
+    if (!serviceName.empty()) {
+      buffer.push_back(ndn::makeStringBlock(tlv::Name, serviceName.toUri()));
+    }
+    if (!applicationPrefix.empty()) {
+      buffer.push_back(ndn::makeStringBlock(tlv::ApplicationPrefix, applicationPrefix.toUri()));
+    }
+    buffer.push_back(ndn::makeNonNegativeIntegerBlock(tlv::ServiceLifetime, serviceLifetime));
+    buffer.push_back(ndn::makeNonNegativeIntegerBlock(tlv::PublishTimestamp, publishTimestamp));
+    ndn::Block metaInfoBuffer(tlv::ServiceMetaInfo);
+    for (const auto& [key, value] : serviceMetaInfo) {
+      ndn::Block keyValuePair(tlv::KeyValuePair);
+      keyValuePair.push_back(ndn::makeStringBlock(tlv::Key, key));
+      keyValuePair.push_back(ndn::makeStringBlock(tlv::Value, value));
+      metaInfoBuffer.push_back(keyValuePair);
+    }
+    buffer.push_back(metaInfoBuffer);
+    buffer.encode();
+    return buffer;
+  }
+
+  std::string toString() const
+  {
+    std::stringstream ss;
+    ss << "ServiceName: " << serviceName << "\n";
+    ss << "ApplicationPrefix: " << applicationPrefix << "\n";
+    ss << "ServiceLifetime: " << serviceLifetime << "\n";
+    ss << "PublishTimestamp: " << publishTimestamp << "\n";
+    ss << "ServiceMetaInfo: \n";
+    for (const auto& [key, value] : serviceMetaInfo) {
+      ss << key << ": " << value << "\n";
+    }
+    return ss.str();
+  }
+};
+
+
+
+typedef std::function<void(const Details& serviceUpdates)> DiscoveryCallback;
+
 
 class ServiceDiscovery
 {
@@ -115,26 +181,7 @@ class ServiceDiscovery
 public:
 
   /**
-    @brief constructor for consumer
-
-    Creates a sync prefix from service type, fetches service name from sync,
-    iteratively fetches service info for each name, and sends it back to the consumer
-
-    @param serviceName Service consumer is interested on. e.g. = printers
-    @param pFlags List of flags, i.e. sync protocol, application type etc
-    @param discoveryCallback
-  **/
-  ServiceDiscovery(const ndn::Name& serviceName,
-                   const std::map<char, uint8_t>& pFlags,
-                   const DiscoveryCallback& discoveryCallback);
-
-  /**
-    @brief Constructor for producer
-
-    Creates a sync prefix from service type, stores service info, sends publication
-    updates to sync, and listen on user-prefix to serve incoming requests
-
-    @param filename Info file to load service details, sample below
+    @brief constructor
 
     required
     {
@@ -150,13 +197,28 @@ public:
     ; all the keys in required field needs to have value
     ; the details can have as many key-values are needed
 
-    @param pFlags List of flags, i.e. sync protocol, application type etc
-  */
+    @param servicegroupName The sync group that publishes the service info
+    @param discoveryCallback
+  **/
+  ServiceDiscovery(const ndn::Name& servicegroupName,
+                    const ndn::Name& nodeName,
+                    ndn::Face& face,
+                    ndn::KeyChain& keyChain,
+                    const DiscoveryCallback& discoveryCallback);
+  
 
-  ServiceDiscovery(const std::string& filename,
-                   const std::map<char, uint8_t>& pFlags,
-                   const DiscoveryCallback& discoveryCallback);
+  // destructor
+  ~ServiceDiscovery();
 
+  void
+  publishServiceDetail(Details details);
+
+  std::map<std::string, Details>
+  getReceivedServiceDetails(){
+    return m_receivedDetails;
+  }
+
+private:
   void
   run();
 
@@ -166,154 +228,36 @@ public:
   */
   void
   stop();
-  /*
-    @brief  Handler exposed to producer application. Used to start the
-     discovery process
-  */
-  void
-  producerHandler();
-
-  /*
-  @brief  Handler exposed to producer application. Used to start the
-     discovery process
-  */
-  void
-  consumerHandler();
-
-  uint32_t
-  getSyncProtocol() const
-  {
-    return m_syncProtocol;
-  }
-  
-   void
-   reloadProducer();
-
-  /*
-   @brief Process Type Flags send by consumer and producer application.
-  */
-  uint8_t
-  processFalgs(const std::map<char, uint8_t>& flags,
-               const char type, bool optional);
-
-  ndn::Name
-  makeSyncPrefix(ndn::Name& service);
-
-  std::string
-  makeDataContent();
-
-private:
-  uint32_t
-  getInterestRetransmissionCount(ndn::Name& interestName);
 
   void
-  doUpdate(const ndn::Name& prefix);
+  OnServiceUpdate(const ndn::svs::SVSPubSub::SubscriptionData &subscription);
 
   void
-  setUpdateProducerState(bool update = false);
-
-  void
-  processSyncUpdate(const std::vector<ndnsd::SyncDataInfo>& updates);
-
-  void
-  processInterest(const ndn::Name& name, const ndn::Interest& interest);
-
-  void
-  sendData(const ndn::Name& name);
-
-  void
-  setInterestFilter(const ndn::Name& prefix, const bool loopback = false);
-
-  void
-  registrationFailed(const ndn::Name& name);
-
-  void
-  onRegistrationSuccess(const ndn::Name& name);
-
-  void
-  onData(const ndn::Interest& interest, const ndn::Data& data);
-
-  void
-  onTimeout(const ndn::Interest& interest);
-
-  void
-  expressInterest(const ndn::Name& interest);
-
-  template<ndn::encoding::Tag TAG>
-  size_t
-  wireEncode(ndn::EncodingImpl<TAG>& block, const std::string& info) const;
-
-  const ndn::Block&
-  wireEncode();
+  OnServiceDiscovery(const ndn::svs::SVSPubSub::SubscriptionData &subscription);
 
 public:
   uint8_t m_appType;
   Details m_producerState;
 
 private:
-  ndn::Face m_face;
-  ndn::KeyChain m_keyChain;
+  ndn::Face& m_face;
+  ndn::KeyChain& m_keyChain;
+  std::shared_ptr<ndn::svs::SVSPubSub> m_svsps;
 
   const std::string m_filename;
   ServiceInfoFileProcessor m_fileProcessor;
-  ndn::Name m_serviceName;
-  // std::map<char, uint8_t> m_Flags; //used??
+  ndn::Name m_servicegroupName;
+  ndn::Name m_nodeName;
 
-  Reply m_consumerReply;
+  // cache the details in a map
+  std::map<std::string, Details> m_serviceDetails;
 
-  uint8_t m_counter;
-  // Map to store interest and its retransmission count
-  std::map <ndn::Name, uint32_t> m_interestRetransmission;
+  // cache recevied details in a map
+  std::map<std::string, Details> m_receivedDetails;
 
-  uint8_t m_serviceStatus;
-
-  uint32_t m_syncProtocol;
-
-  // Flag specific to consumer application, if set, will not stop consumer application
-  // but rather keep listening for service updates and send it back to user.
-  uint32_t m_contDiscovery;
-  SyncProtocolAdapter m_syncAdapter;
-  static const ndn::Name DEFAULT_CONSUMER_ONLY_NAME;
-  mutable ndn::Block m_wire;
   DiscoveryCallback m_discoveryCallback;
-  ndn::Name m_reloadPrefix;
-};
 
-class MultiServiceDiscovery {
-public:
-    MultiServiceDiscovery() {}
-
-    void addServiceDiscovery(std::shared_ptr<ndnsd::discovery::ServiceDiscovery> serviceDiscovery) {
-        std::lock_guard<std::mutex> lock(m_mutex);
-        m_serviceDiscoveries.push_back(serviceDiscovery);
-    }
-
-    void startAll() {
-        std::lock_guard<std::mutex> lock(m_mutex);
-        for (auto& serviceDiscovery : m_serviceDiscoveries) {
-            if(serviceDiscovery->m_appType == PRODUCER) {
-              std::thread t(&ndnsd::discovery::ServiceDiscovery::producerHandler, serviceDiscovery);
-              //t.detach(); // Detach thread to let it run independently
-              m_threads.push_back(std::move(t));
-            }else{
-              std::thread t(&ndnsd::discovery::ServiceDiscovery::consumerHandler, serviceDiscovery);
-              //t.detach(); // Detach thread to let it run independently
-              m_threads.push_back(std::move(t));
-            }
-        }
-    }
-
-    void stopAll() {
-        std::lock_guard<std::mutex> lock(m_mutex);
-        for (auto& serviceDiscovery : m_serviceDiscoveries) {
-            serviceDiscovery->stop();
-        }
-    }
-
-private:
-    std::vector<std::shared_ptr<ndnsd::discovery::ServiceDiscovery>> m_serviceDiscoveries;
-    std::vector<std::thread> m_threads;
-    std::mutex m_mutex;
+  ndn::time::steady_clock::time_point m_lastDiscoveryTime;
 };
 
 } //namespace discovery

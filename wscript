@@ -32,11 +32,8 @@ def configure(conf):
 
     conf.check_boost(lib=boost_libs, mt=True)
 
-    conf.check_cfg(package='ChronoSync', args=['ChronoSync >= 0.5.4', '--cflags', '--libs'],
-                   uselib_store='SYNC', pkg_config_path=pkg_config_path)
-
-    conf.check_cfg(package='PSync', args=['PSync >= 0.3.0', '--cflags', '--libs'],
-                   uselib_store='PSYNC', pkg_config_path=pkg_config_path)
+    conf.check_cfg(package='libndn-svs', args=['libndn-svs >= 0.1.0', '--cflags', '--libs'],
+                    uselib_store='NDN_SVS', pkg_config_path=pkg_config_path)
 
     conf.check_compiler_flags()
 
@@ -57,16 +54,12 @@ def build(bld):
               vnum=VERSION,
               cnum=VERSION,
               source=bld.path.ant_glob('ndnsd/**/*.cpp'),
-              use='NDN_CXX BOOST SYNC PSYNC',
+              use='NDN_CXX BOOST NDN_SVS',
               includes='.',
               export_includes='.')
 
     if bld.env.WITH_EXAMPLES:
         bld.recurse('examples')
-
-    bld.recurse('tools')
-    bld.recurse('comparision/proactive')
-    bld.recurse('comparision/reactive')
 
     headers = bld.path.ant_glob('ndnsd/**/*.hpp')
     bld.install_files(bld.env.INCLUDEDIR, headers, relative_trick=True)

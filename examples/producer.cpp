@@ -37,49 +37,65 @@ class Producer
 {
 public:
 
-  Producer(const std::string& filename, const std::map<char, uint8_t>& pFlags)
-    : m_serviceDiscovery(filename, pFlags, std::bind(&Producer::processCallback, this, _1))
+  Producer(ndn::Face& face, const std::string& syncGroupName, const std::string& nodeName)
+    : m_face(face),
+      m_syncGroupName(syncGroupName),
+      m_nodeName(nodeName),
+      m_serviceDiscovery(syncGroupName, nodeName, m_face, m_keyChain, std::bind(&Producer::processCallback, this, _1))
   {
+    execute ();
   }
   void
   execute ()
   {
-    m_serviceDiscovery.producerHandler();
+    NDN_LOG_DEBUG("Executing producer");
+    ndnsd::discovery::Details details_0{ndn::Name("/FlightControl/Takeoff"),
+                                      ndn::Name(m_nodeName),
+                                      3600,
+                                      time(NULL),
+                                      {{"type", "flight control"}, {"version", "1.0.0"}, {"tokenName", m_nodeName+"/NDNSF/TOKEN/FlightControl/Takeoff"}}};
+                                    
+    ndnsd::discovery::Details details_1{ndn::Name("/FlightControl/Land"),
+                                      ndn::Name(m_nodeName),
+                                      3600,
+                                      time(NULL),
+                                      {{"type", "flight control"}, {"version", "1.0.0"}, {"tokenName", m_nodeName+"/NDNSF/TOKEN/FlightControl/Land"}}};
+    m_serviceDiscovery.publishServiceDetail(details_0);
+    m_serviceDiscovery.publishServiceDetail(details_1);
   }
 
 private:
   void
-  processCallback(const ndnsd::discovery::Reply& callback)
+  processCallback(const ndnsd::discovery::Details& details)
   {
     NDN_LOG_INFO("Service publish callback received");
-    auto status = (callback.status == ndnsd::discovery::ACTIVE)? "ACTIVE": "EXPIRED";
-    NDN_LOG_INFO("Status: " << status);
-    for (auto& item : callback.serviceDetails)
-    {
-      NDN_LOG_INFO("Callback: " << item.first << ":" << item.second);
+    for(const auto& detail : m_serviceDiscovery.getReceivedServiceDetails()){
+      NDN_LOG_INFO(detail.second.toString());
     }
   }
 
 private:
+  ndn::Face& m_face;
+  ndn::KeyChain m_keyChain;
+  std::string m_syncGroupName;
+  std::string m_nodeName;
   ndnsd::discovery::ServiceDiscovery m_serviceDiscovery;
 };
 
 int
 main(int argc, char* argv[])
 {
-  int syncProtocol = ndnsd::SYNC_PROTOCOL_PSYNC;
-  // this is causing seg fault, need to look.
-  if (argc > 2)
-    syncProtocol = atoi(argv[2]);
-
-  std::map<char, uint8_t> flags;
-  flags.insert(std::pair<char, uint8_t>('p', syncProtocol)); //protocol choice
-  flags.insert(std::pair<char, uint8_t>('t', ndnsd::discovery::PRODUCER)); //type producer: 1
+  if (argc < 3) {
+    std::cerr << "Usage: " << argv[0] << " <syncGroupName> <nodeName>" << std::endl;
+    return 1;
+  }
 
   try {
     NDN_LOG_INFO("Starting producer application");
-    Producer producer(argv[1], flags);
-    producer.execute();
+    ndn::Face face;
+    std::thread m_thread([&face](){face.processEvents(ndn::time::seconds(100),true);});
+    Producer producer(face, argv[1], argv[2]);
+    m_thread.join();
   }
   catch (const std::exception& e) {
     std::cout << "Exception: " << e.what() << std::endl;
