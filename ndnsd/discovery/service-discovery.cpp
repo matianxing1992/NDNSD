@@ -51,8 +51,8 @@ ServiceDiscovery::ServiceDiscovery(const ndn::Name& servicegroupName, const ndn:
 
     // Do not fetch publications older than 10 seconds
     ndn::svs::SVSPubSubOptions opts;
-    opts.useTimestamp = true;
-    opts.maxPubAge = ndn::time::seconds(10);
+    opts.useTimestamp = false;
+    // opts.maxPubAge = ndn::time::seconds(10);
 
     m_svsps = std::make_shared<ndn::svs::SVSPubSub>(
       ndn::Name(servicegroupName).append("NDNSD"),
